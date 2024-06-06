@@ -32,11 +32,12 @@ ALTER DATABASE ${catalog}.${wh_db}_${scale_factor} ${pred_opt} PREDICTIVE OPTIMI
 -- COMMAND ----------
 
 CREATE OR REPLACE TABLE ${catalog}.${wh_db}_${scale_factor}_stage.FinWire (
-  value STRING COMMENT 'Pre-parsed String Values of all FinWire files',
-  rectype STRING COMMENT 'Indicates the type of table into which this record will eventually be parsed: CMP FIN or SEC'
+  rectype STRING COMMENT 'Indicates the type of table into which this record will eventually be parsed: CMP FIN or SEC',
+  recdate date COMMENT 'Date of the record',
+  value STRING COMMENT 'Pre-parsed String Values of all FinWire files'
 ) 
 PARTITIONED BY (rectype)
-TBLPROPERTIES ('delta.autoOptimize.autoCompact'=False, 'delta.autoOptimize.optimizeWrite'=True);
+TBLPROPERTIES ('delta.dataSkippingNumIndexedCols' = 0, 'delta.autoOptimize.autoCompact'=False, 'delta.autoOptimize.optimizeWrite'=True);
 
 -- COMMAND ----------
 
@@ -490,15 +491,6 @@ FROM
 
 -- COMMAND ----------
 
-CREATE OR REPLACE VIEW ${catalog}.${wh_db}_${scale_factor}_stage.v_FinWire AS
-SELECT
-  value,
-  substring(value, 16, 3) rectype
-FROM 
-  text.`${tpcdi_directory}sf=${scale_factor}/Batch1/FINWIRE[0-9][0-9][0-9][0-9]Q[1-4]`;
-
--- COMMAND ----------
-
 CREATE OR REPLACE VIEW ${catalog}.${wh_db}_${scale_factor}_stage.v_CustomerIncremental AS
 with c as (
   SELECT
@@ -827,11 +819,15 @@ DailyMarket as (
     dm.*,
     min_by(struct(dm_low, dm_date), dm_low) OVER (
       PARTITION BY dm_s_symb
-      ORDER BY dm_date ASC ROWS BETWEEN 364 PRECEDING AND CURRENT ROW
+      ORDER BY dm_date ASC 
+      RANGE BETWEEN INTERVAL '1' YEAR PRECEDING --ROWS BETWEEN 364 PRECEDING 
+      AND CURRENT ROW
     ) fiftytwoweeklow,
     max_by(struct(dm_high, dm_date), dm_high) OVER (
       PARTITION by dm_s_symb
-      ORDER BY dm_date ASC ROWS BETWEEN 364 PRECEDING AND CURRENT ROW
+      ORDER BY dm_date ASC 
+      RANGE BETWEEN INTERVAL '1' YEAR PRECEDING -- ROWS BETWEEN 364 PRECEDING 
+      AND CURRENT ROW
     ) fiftytwoweekhigh
   FROM
     (
@@ -950,3 +946,21 @@ SELECT
   batchid
 FROM p
 where val[22] = 3
+
+-- COMMAND ----------
+
+CREATE OR REPLACE VIEW ${catalog}.${wh_db}_${scale_factor}_stage.v_FinWire AS
+SELECT
+  if(
+    substring(value, 16, 3) = 'FIN', 
+    nvl2(
+      try_cast(trim(substring(value, 187, 60)) as bigint), 
+      'FIN_COMPANYID', 
+      'FIN_NAME'
+    ), 
+    substring(value, 16, 3)
+  ) rectype,
+  to_date(substring(value, 1, 8), 'yyyyMMdd') AS recdate,
+  substring(value, 19) value
+FROM 
+  text.`${tpcdi_directory}sf=${scale_factor}/Batch1/FINWIRE[0-9][0-9][0-9][0-9]Q[1-4]`
