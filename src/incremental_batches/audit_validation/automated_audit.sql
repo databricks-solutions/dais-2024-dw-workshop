@@ -2411,9 +2411,3 @@ from (
           m1.MessageSource
       ) o
   ) q;
-
--- COMMAND ----------
-
--- DISABLE Predictive Optimization since this is the end of the benchmark and is just for testing purposes
-ALTER DATABASE ${catalog}.${wh_db}_${scale_factor}_stage DISABLE PREDICTIVE OPTIMIZATION;
-ALTER DATABASE ${catalog}.${wh_db}_${scale_factor} DISABLE PREDICTIVE OPTIMIZATION;
